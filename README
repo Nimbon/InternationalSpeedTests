@@ -5,6 +5,6 @@ Utilises speedtest-cli 2.1.1 with some modifications that removes IP from output
 How to use:
 wget https://github.com/FruityAddon/InternationalSpeedTests/archive/master.zip
 unzip master.zip
-cd InternationalSpeedTest-master
+cd InternationalSpeedTests-master
 chmod +x setup.sh
 ./setup.sh
