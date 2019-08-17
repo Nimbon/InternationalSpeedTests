@@ -1,0 +1,41 @@
+Sydney
+Brisbane
+Melbourne
+Darwin
+Hobart
+Perth
+Canberra
+Adelaide
+New Zealand
+Vancouver
+Toronto
+Hawaii
+Los Angeles
+San Jose
+New York
+Papua New Guinea
+Guam
+Hong Kong
+Shenzhen
+Beijing
+Shanghai
+Macau
+Taipei
+Tokyo
+Russia
+Singapore
+Phillipines
+India
+Oman
+Egypt
+Spain
+France
+United Kingdom
+Sri Lanka
+South Africa
+Uganda
+Tanzania
+Nigeria
+Chile
+Uruguay
+Brazil
