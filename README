@@ -11,3 +11,6 @@ unzip master.zip
 cd InternationalSpeedTests-master
 chmod +x setup.sh
 ./setup.sh
+
+
+TODO: Fix and retest if still compatible with current python versions.
