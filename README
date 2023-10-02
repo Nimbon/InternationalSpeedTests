@@ -13,4 +13,14 @@ chmod +x setup.sh
 ./setup.sh
 
 
-TODO: Fix and retest if still compatible with current python versions.
+------
+
+
+Sadly this no longer works due to limitations in the locations request only returning 10 locations maximum...
+
+I will need to rework the code to support the official Ookla speedtest.
+
+More details on the issue can be found at 
+https://www.reddit.com/r/commandline/comments/x2hv2o/speedtestcli_list_returns_only_10_servers/
+
+Spending my Labour Day public holiday fixing up broken code repos. ;-)
