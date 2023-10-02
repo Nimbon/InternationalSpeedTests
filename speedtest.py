@@ -15,18 +15,18 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import os
-import re
 import csv
-import sys
-import math
+import datetime
 import errno
+import math
+import os
+import platform
+import re
 import signal
 import socket
-import timeit
-import datetime
-import platform
+import sys
 import threading
+import timeit
 import xml.parsers.expat
 
 try:
@@ -36,7 +36,7 @@ except ImportError:
     gzip = None
     GZIP_BASE = object
 
-__version__ = '2.1.1'
+__version__ = '2.1.4b1'
 
 
 class FakeShutdownEvent(object):
@@ -49,10 +49,16 @@ class FakeShutdownEvent(object):
         "Dummy method to always return false"""
         return False
 
+    is_set = isSet
+
 
 # Some global variables we use
 DEBUG = False
 _GLOBAL_DEFAULT_TIMEOUT = object()
+PY25PLUS = sys.version_info[:2] >= (2, 5)
+PY26PLUS = sys.version_info[:2] >= (2, 6)
+PY32PLUS = sys.version_info[:2] >= (3, 2)
+PY310PLUS = sys.version_info[:2] >= (3, 10)
 
 # Begin import game to handle Python 2 and Python 3
 try:
@@ -64,14 +70,15 @@ except ImportError:
         json = None
 
 try:
-    import xml.etree.cElementTree as ET
-except ImportError:
+    import xml.etree.ElementTree as ET
     try:
-        import xml.etree.ElementTree as ET
+        from xml.etree.ElementTree import _Element as ET_Element
     except ImportError:
-        from xml.dom import minidom as DOM
-        from xml.parsers.expat import ExpatError
-        ET = None
+        pass
+except ImportError:
+    from xml.dom import minidom as DOM
+    from xml.parsers.expat import ExpatError
+    ET = None
 
 try:
     from urllib2 import (urlopen, Request, HTTPError, URLError,
@@ -262,7 +269,6 @@ else:
             write(arg)
         write(end)
 
-
 # Exception "constants" to support Python 2 through Python 3
 try:
     import ssl
@@ -278,6 +284,23 @@ try:
 except ImportError:
     ssl = None
     HTTP_ERRORS = (HTTPError, URLError, socket.error, BadStatusLine)
+
+if PY32PLUS:
+    etree_iter = ET.Element.iter
+elif PY25PLUS:
+    etree_iter = ET_Element.getiterator
+
+if PY26PLUS:
+    thread_is_alive = threading.Thread.is_alive
+else:
+    thread_is_alive = threading.Thread.isAlive
+
+
+def event_is_set(event):
+    try:
+        return event.is_set()
+    except AttributeError:
+        return event.isSet()
 
 
 class SpeedtestException(Exception):
@@ -399,6 +422,8 @@ class SpeedtestHTTPConnection(HTTPConnection):
         source_address = kwargs.pop('source_address', None)
         timeout = kwargs.pop('timeout', 10)
 
+        self._tunnel_host = None
+
         HTTPConnection.__init__(self, *args, **kwargs)
 
         self.source_address = source_address
@@ -419,16 +444,22 @@ class SpeedtestHTTPConnection(HTTPConnection):
                 self.source_address
             )
 
+        if self._tunnel_host:
+            self._tunnel()
+
 
 if HTTPSConnection:
-    class SpeedtestHTTPSConnection(HTTPSConnection,
-                                   SpeedtestHTTPConnection):
+    class SpeedtestHTTPSConnection(HTTPSConnection):
         """Custom HTTPSConnection to support source_address across
         Python 2.4 - Python 3
         """
+        default_port = 443
+
         def __init__(self, *args, **kwargs):
             source_address = kwargs.pop('source_address', None)
             timeout = kwargs.pop('timeout', 10)
+
+            self._tunnel_host = None
 
             HTTPSConnection.__init__(self, *args, **kwargs)
 
@@ -437,14 +468,30 @@ if HTTPSConnection:
 
         def connect(self):
             "Connect to a host on a given (SSL) port."
+            try:
+                self.sock = socket.create_connection(
+                    (self.host, self.port),
+                    self.timeout,
+                    self.source_address
+                )
+            except (AttributeError, TypeError):
+                self.sock = create_connection(
+                    (self.host, self.port),
+                    self.timeout,
+                    self.source_address
+                )
 
-            SpeedtestHTTPConnection.connect(self)
+            if self._tunnel_host:
+                self._tunnel()
 
             if ssl:
                 try:
                     kwargs = {}
                     if hasattr(ssl, 'SSLContext'):
-                        kwargs['server_hostname'] = self.host
+                        if self._tunnel_host:
+                            kwargs['server_hostname'] = self._tunnel_host
+                        else:
+                            kwargs['server_hostname'] = self.host
                     self.sock = self._context.wrap_socket(self.sock, **kwargs)
                 except AttributeError:
                     self.sock = ssl.wrap_socket(self.sock)
@@ -731,7 +778,7 @@ def print_dots(shutdown_event):
     status
     """
     def inner(current, total, start=False, end=False):
-        if shutdown_event.isSet():
+        if event_is_set(shutdown_event):
             return
 
         sys.stdout.write('.')
@@ -770,7 +817,7 @@ class HTTPDownloader(threading.Thread):
         try:
             if (timeit.default_timer() - self.starttime) <= self.timeout:
                 f = self._opener(self.request)
-                while (not self._shutdown_event.isSet() and
+                while (not event_is_set(self._shutdown_event) and
                         (timeit.default_timer() - self.starttime) <=
                         self.timeout):
                     self.result.append(len(f.read(10240)))
@@ -778,6 +825,8 @@ class HTTPDownloader(threading.Thread):
                         break
                 f.close()
         except IOError:
+            pass
+        except HTTP_ERRORS:
             pass
 
 
@@ -824,7 +873,7 @@ class HTTPUploaderData(object):
 
     def read(self, n=10240):
         if ((timeit.default_timer() - self.start) <= self.timeout and
-                not self._shutdown_event.isSet()):
+                not event_is_set(self._shutdown_event)):
             chunk = self.data.read(n)
             self.total.append(len(chunk))
             return chunk
@@ -844,7 +893,7 @@ class HTTPUploader(threading.Thread):
         self.request = request
         self.request.data.start = self.starttime = start
         self.size = size
-        self.result = None
+        self.result = 0
         self.timeout = timeout
         self.i = i
 
@@ -862,7 +911,7 @@ class HTTPUploader(threading.Thread):
         request = self.request
         try:
             if ((timeit.default_timer() - self.starttime) <= self.timeout and
-                    not self._shutdown_event.isSet()):
+                    not event_is_set(self._shutdown_event)):
                 try:
                     f = self._opener(request)
                 except TypeError:
@@ -879,6 +928,8 @@ class HTTPUploader(threading.Thread):
                 self.result = 0
         except (IOError, SpeedtestUploadTimeout):
             self.result = sum(self.request.data.total)
+        except HTTP_ERRORS:
+            self.result = 0
 
 
 class SpeedtestResults(object):
@@ -1132,9 +1183,9 @@ class Speedtest(object):
             # times = get_attributes_by_tag_name(root, 'times')
             client = get_attributes_by_tag_name(root, 'client')
 
-        ignore_servers = list(
-            map(int, server_config['ignoreids'].split(','))
-        )
+        ignore_servers = [
+            int(i) for i in server_config['ignoreids'].split(',') if i
+        ]
 
         ratio = int(upload['ratio'])
         upload_max = int(upload['maxchunkcount'])
@@ -1262,7 +1313,7 @@ class Speedtest(object):
                             raise SpeedtestServersError(
                                 'Malformed speedtest.net server list: %s' % e
                             )
-                        elements = root.getiterator('server')
+                        elements = etree_iter(root, 'server')
                     except AttributeError:
                         try:
                             root = DOM.parseString(serversxml)
@@ -1482,6 +1533,9 @@ class Speedtest(object):
                 build_request(url, bump=i, secure=self._secure)
             )
 
+        max_threads = threads or self.config['threads']['download']
+        in_flight = {'threads': 0}
+
         def producer(q, requests, request_count):
             for i, request in enumerate(requests):
                 thread = HTTPDownloader(
@@ -1492,21 +1546,26 @@ class Speedtest(object):
                     opener=self._opener,
                     shutdown_event=self._shutdown_event
                 )
+                while in_flight['threads'] >= max_threads:
+                    timeit.time.sleep(0.001)
                 thread.start()
                 q.put(thread, True)
+                in_flight['threads'] += 1
                 callback(i, request_count, start=True)
 
         finished = []
 
         def consumer(q, request_count):
+            _is_alive = thread_is_alive
             while len(finished) < request_count:
                 thread = q.get(True)
-                while thread.isAlive():
-                    thread.join(timeout=0.1)
+                while _is_alive(thread):
+                    thread.join(timeout=0.001)
+                in_flight['threads'] -= 1
                 finished.append(sum(thread.result))
                 callback(thread.i, request_count, end=True)
 
-        q = Queue(threads or self.config['threads']['download'])
+        q = Queue(max_threads)
         prod_thread = threading.Thread(target=producer,
                                        args=(q, requests, request_count))
         cons_thread = threading.Thread(target=consumer,
@@ -1514,10 +1573,11 @@ class Speedtest(object):
         start = timeit.default_timer()
         prod_thread.start()
         cons_thread.start()
-        while prod_thread.isAlive():
-            prod_thread.join(timeout=0.1)
-        while cons_thread.isAlive():
-            cons_thread.join(timeout=0.1)
+        _is_alive = thread_is_alive
+        while _is_alive(prod_thread):
+            prod_thread.join(timeout=0.001)
+        while _is_alive(cons_thread):
+            cons_thread.join(timeout=0.001)
 
         stop = timeit.default_timer()
         self.results.bytes_received = sum(finished)
@@ -1566,6 +1626,9 @@ class Speedtest(object):
                 )
             )
 
+        max_threads = threads or self.config['threads']['upload']
+        in_flight = {'threads': 0}
+
         def producer(q, requests, request_count):
             for i, request in enumerate(requests[:request_count]):
                 thread = HTTPUploader(
@@ -1577,17 +1640,22 @@ class Speedtest(object):
                     opener=self._opener,
                     shutdown_event=self._shutdown_event
                 )
+                while in_flight['threads'] >= max_threads:
+                    timeit.time.sleep(0.001)
                 thread.start()
                 q.put(thread, True)
+                in_flight['threads'] += 1
                 callback(i, request_count, start=True)
 
         finished = []
 
         def consumer(q, request_count):
+            _is_alive = thread_is_alive
             while len(finished) < request_count:
                 thread = q.get(True)
-                while thread.isAlive():
-                    thread.join(timeout=0.1)
+                while _is_alive(thread):
+                    thread.join(timeout=0.001)
+                in_flight['threads'] -= 1
                 finished.append(thread.result)
                 callback(thread.i, request_count, end=True)
 
@@ -1599,9 +1667,10 @@ class Speedtest(object):
         start = timeit.default_timer()
         prod_thread.start()
         cons_thread.start()
-        while prod_thread.isAlive():
+        _is_alive = thread_is_alive
+        while _is_alive(prod_thread):
             prod_thread.join(timeout=0.1)
-        while cons_thread.isAlive():
+        while _is_alive(cons_thread):
             cons_thread.join(timeout=0.1)
 
         stop = timeit.default_timer()
@@ -1841,7 +1910,7 @@ def shell():
                         raise
         sys.exit(0)
 
-    printer('Testing from %(isp)s ...' % speedtest.config['client'],
+    printer('Testing from %(isp)s (%(ip)s)...' % speedtest.config['client'],
             quiet)
 
     if not args.mini:
