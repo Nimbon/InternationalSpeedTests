@@ -3,10 +3,10 @@ International Speed Tests with International Link Locations selected from an Aus
 Utilises speedtest-cli 2.1.3 with some modifications that removes IP from output, allowing logs to be uploaded straight to sites like pastebin with a somewhat reduced risk of identification.
 
 Prerequisites:
-Python 2.x or 3.x
+Python 2.4 - 3.7
 
 How to use:
-wget https://github.com/FruityAddon/InternationalSpeedTests/archive/master.zip
+wget https://github.com/Nimbon/InternationalSpeedTests/archive/master.zip
 unzip master.zip
 cd InternationalSpeedTests-master
 chmod +x setup.sh
