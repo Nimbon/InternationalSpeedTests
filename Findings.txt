@@ -1,0 +1,14 @@
+Alternative ookla official application has the same problems and also does not work.... 
+
+The only solution seems to be to use publicly available server databases which may be old and deprecated.
+
+Such include:
+https://gist.github.com/ofou/654efe67e173a6bff5c64ba26c09d058
+
+Furthermore, the official client found here
+
+https://www.speedtest.net/apps/cli
+pointing to
+https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-linux-x86_64.tgz
+
+After running "speedtest -L", it only lists results of 10 servers being found... The same problem with the unofficial client arises with the official client, suggesting it is some type of limitation with the ookla API.
